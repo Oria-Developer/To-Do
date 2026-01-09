@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Oria To Do | Pro</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"></script>
     <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js" type="module"></script>
     <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js" type="module"></script>
     <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js" type="module"></script>
@@ -67,7 +66,6 @@
 
         .status-online { background-color: var(--accent); box-shadow: 0 0 10px var(--accent); }
 
-        /* Hide scrollbars for a clean look */
         ::-webkit-scrollbar { width: 4px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #333; border-radius: 10px; }
@@ -92,15 +90,13 @@
         </div>
 
         <div id="noteList" class="flex-1 overflow-y-auto px-3 py-2 space-y-1">
-            <!-- Notes populate here -->
-            <div class="animate-pulse flex space-y-4 flex-col p-4">
-                <div class="h-4 bg-white/5 rounded w-3/4"></div>
-                <div class="h-4 bg-white/5 rounded w-1/2"></div>
-            </div>
+            <div id="loadingIndicator" class="p-4 text-xs text-white/30 italic">Initializing storage...</div>
         </div>
 
         <div class="p-6 border-t border-white/5 flex items-center justify-between">
             <div class="flex items-center gap-2">
+                <span class="status-dot status-online"></span>
+                <span class="text-[10px] uppercase tracking-widest opacity-50 font-bold">Cloud Sync</span>
             </div>
             <div id="saveMsg" class="text-[10px] text-green-500 opacity-0 transition-opacity">Saved</div>
         </div>
@@ -108,7 +104,6 @@
 
     <!-- Main Content Area -->
     <main class="flex-1 flex flex-col editor-container relative">
-        <!-- Toolbar -->
         <div class="h-16 flex items-center justify-between px-8 border-b border-white/5">
             <input id="noteTitle" type="text" class="bg-transparent border-none outline-none text-lg font-semibold w-1/2" placeholder="Untitled Entry">
             <div class="flex items-center gap-4">
@@ -120,7 +115,6 @@
             </div>
         </div>
 
-        <!-- Single Editor (No Preview) -->
         <div class="flex-1 flex justify-center p-8 lg:p-12 overflow-y-auto">
             <textarea id="editor" class="w-full max-w-3xl h-full" placeholder="Start typing..."></textarea>
         </div>
@@ -128,11 +122,11 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, getDocs, collection, query, onSnapshot, deleteDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         const firebaseConfig = JSON.parse(__firebase_config);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'oria-pro-v2';
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'oria-pro-v3';
         
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
@@ -144,18 +138,28 @@
         const newNoteBtn = document.getElementById('newNote');
         const deleteNoteBtn = document.getElementById('deleteNote');
         const saveMsg = document.getElementById('saveMsg');
+        const loadingIndicator = document.getElementById('loadingIndicator');
 
         let user = null;
-        let currentNoteId = 'default';
-        let isSaving = false;
+        let currentNoteId = null;
         let notesData = {};
+        let isFirstLoad = true;
 
-        // Auth
-        const init = async () => {
-            const userCred = await signInAnonymously(auth);
-            user = userCred.user;
-            setupRealtimeSync();
+        // Auth Flow
+        const startAuth = async () => {
+            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                await signInWithCustomToken(auth, __initial_auth_token);
+            } else {
+                await signInAnonymously(auth);
+            }
         };
+
+        onAuthStateChanged(auth, (u) => {
+            if (u) {
+                user = u;
+                setupRealtimeSync();
+            }
+        });
 
         const setupRealtimeSync = () => {
             if (!user) return;
@@ -165,49 +169,58 @@
                 notesData = {};
                 noteList.innerHTML = '';
                 
-                if (snapshot.empty) {
+                if (snapshot.empty && isFirstLoad) {
+                    isFirstLoad = false;
                     createNewNote();
                     return;
                 }
 
-                snapshot.docs.forEach(doc => {
-                    const data = doc.data();
-                    notesData[doc.id] = { id: doc.id, ...data };
+                snapshot.docs.forEach(docSnap => {
+                    const data = docSnap.data();
+                    notesData[docSnap.id] = { id: docSnap.id, ...data };
                     
                     const div = document.createElement('div');
-                    div.className = `note-item p-4 rounded-xl cursor-pointer text-sm truncate ${currentNoteId === doc.id ? 'active' : 'text-white/40 hover:text-white/70 hover:bg-white/5'}`;
+                    div.className = `note-item p-4 rounded-xl cursor-pointer text-sm truncate ${currentNoteId === docSnap.id ? 'active' : 'text-white/40 hover:text-white/70 hover:bg-white/5'}`;
                     div.innerText = data.title || 'Untitled Entry';
-                    div.onclick = () => switchNote(doc.id);
+                    div.onclick = () => switchNote(docSnap.id);
                     noteList.appendChild(div);
                 });
 
-                if (currentNoteId && notesData[currentNoteId]) {
-                    // Update current view if data changed remotely (rare but good practice)
-                    if (document.activeElement !== editor && document.activeElement !== noteTitle) {
-                        displayCurrentNote();
-                    }
+                if (isFirstLoad && snapshot.docs.length > 0) {
+                    isFirstLoad = false;
+                    switchNote(snapshot.docs[0].id);
                 }
-            }, (error) => console.error("Sync Error:", error));
-        };
-
-        const displayCurrentNote = () => {
-            const note = notesData[currentNoteId];
-            if (note) {
-                noteTitle.value = note.title || '';
-                editor.value = note.content || '';
-            }
+            }, (error) => {
+                console.error("Sync Error:", error);
+                loadingIndicator.innerText = "Connection error. Retrying...";
+            });
         };
 
         const switchNote = (id) => {
             currentNoteId = id;
-            displayCurrentNote();
-            setupRealtimeSync(); // Refresh list styles
+            const note = notesData[id];
+            if (note) {
+                noteTitle.value = note.title || '';
+                editor.value = note.content || '';
+            }
+            // Update active state in UI
+            Array.from(noteList.children).forEach(child => {
+                child.classList.remove('active', 'text-white');
+                child.classList.add('text-white/40');
+            });
+            const activeEl = Array.from(noteList.children).find(el => el.innerText === (note?.title || 'Untitled Entry'));
+            if (activeEl) {
+                activeEl.classList.add('active', 'text-white');
+                activeEl.classList.remove('text-white/40');
+            }
         };
 
         const createNewNote = async () => {
+            if (!user) return;
             const id = 'note_' + Date.now();
             currentNoteId = id;
-            await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'notes', id), {
+            const noteRef = doc(db, 'artifacts', appId, 'users', user.uid, 'notes', id);
+            await setDoc(noteRef, {
                 title: 'New Workspace',
                 content: '',
                 updatedAt: serverTimestamp()
@@ -226,7 +239,7 @@
                 }, { merge: true });
                 setTimeout(() => saveMsg.style.opacity = '0', 1000);
             } catch (e) {
-                console.error(e);
+                console.error("Save error:", e);
             }
         };
 
@@ -236,19 +249,22 @@
             saveTimeout = setTimeout(autoSave, 800);
         };
 
-        // UI Listeners
         editor.addEventListener('input', triggerAutoSave);
         noteTitle.addEventListener('input', triggerAutoSave);
         newNoteBtn.addEventListener('click', createNewNote);
         
         deleteNoteBtn.addEventListener('click', async () => {
-            if (confirm('Delete this entry forever?')) {
+            if (!currentNoteId) return;
+            const confirmDel = confirm('Delete this entry?');
+            if (confirmDel) {
                 await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'notes', currentNoteId));
-                currentNoteId = Object.keys(notesData)[0] || 'default';
+                currentNoteId = null;
+                editor.value = '';
+                noteTitle.value = '';
             }
         });
 
-        init();
+        startAuth();
     </script>
 </body>
 </html>
