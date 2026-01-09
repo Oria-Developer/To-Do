@@ -3,11 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Oria To Do | Pro</title>
+    <title>Oria To Do | Local Pro</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js" type="module"></script>
-    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js" type="module"></script>
-    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js" type="module"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap');
 
@@ -49,6 +46,7 @@
 
         .note-item {
             transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            border-left: 3px solid transparent;
         }
 
         .note-item.active {
@@ -64,7 +62,7 @@
             display: inline-block;
         }
 
-        .status-online { background-color: var(--accent); box-shadow: 0 0 10px var(--accent); }
+        .status-local { background-color: #3b82f6; box-shadow: 0 0 10px #3b82f6; }
 
         ::-webkit-scrollbar { width: 4px; }
         ::-webkit-scrollbar-track { background: transparent; }
@@ -77,7 +75,7 @@
     <aside class="w-72 glass-panel flex flex-col h-full z-10">
         <div class="p-6 border-b border-white/5 flex items-center gap-3">
             <img src="https://ik.imagekit.io/tycncf0zq0/Oria.png?updatedAt=1767746764146" alt="Oria" class="w-8 h-8 object-contain">
-            <h1 class="font-bold text-lg tracking-tight">Oria <span class="text-green-500">Pro</span></h1>
+            <h1 class="font-bold text-lg tracking-tight">Oria <span class="text-green-500">Local</span></h1>
         </div>
 
         <div class="p-4">
@@ -90,13 +88,13 @@
         </div>
 
         <div id="noteList" class="flex-1 overflow-y-auto px-3 py-2 space-y-1">
-            <div id="loadingIndicator" class="p-4 text-xs text-white/30 italic">Initializing storage...</div>
+            <!-- Notes populate here -->
         </div>
 
         <div class="p-6 border-t border-white/5 flex items-center justify-between">
             <div class="flex items-center gap-2">
-                <span class="status-dot status-online"></span>
-                <span class="text-[10px] uppercase tracking-widest opacity-50 font-bold">Cloud Sync</span>
+                <span class="status-dot status-local"></span>
+                <span class="text-[10px] uppercase tracking-widest opacity-50 font-bold">Local Storage</span>
             </div>
             <div id="saveMsg" class="text-[10px] text-green-500 opacity-0 transition-opacity">Saved</div>
         </div>
@@ -120,151 +118,119 @@
         </div>
     </main>
 
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, getDocs, collection, query, onSnapshot, deleteDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-
-        const firebaseConfig = JSON.parse(__firebase_config);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'oria-pro-v3';
-        
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
-
+    <script>
         const editor = document.getElementById('editor');
         const noteTitle = document.getElementById('noteTitle');
         const noteList = document.getElementById('noteList');
         const newNoteBtn = document.getElementById('newNote');
         const deleteNoteBtn = document.getElementById('deleteNote');
         const saveMsg = document.getElementById('saveMsg');
-        const loadingIndicator = document.getElementById('loadingIndicator');
 
-        let user = null;
-        let currentNoteId = null;
-        let notesData = {};
-        let isFirstLoad = true;
+        let notes = JSON.parse(localStorage.getItem('oria_notes')) || [];
+        let currentNoteId = localStorage.getItem('oria_current_note_id') || null;
 
-        // Auth Flow
-        const startAuth = async () => {
-            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                await signInWithCustomToken(auth, __initial_auth_token);
-            } else {
-                await signInAnonymously(auth);
-            }
-        };
+        function saveToDisk() {
+            localStorage.setItem('oria_notes', JSON.stringify(notes));
+            localStorage.setItem('oria_current_note_id', currentNoteId);
+        }
 
-        onAuthStateChanged(auth, (u) => {
-            if (u) {
-                user = u;
-                setupRealtimeSync();
-            }
-        });
-
-        const setupRealtimeSync = () => {
-            if (!user) return;
-            const q = collection(db, 'artifacts', appId, 'users', user.uid, 'notes');
-            
-            onSnapshot(q, (snapshot) => {
-                notesData = {};
-                noteList.innerHTML = '';
-                
-                if (snapshot.empty && isFirstLoad) {
-                    isFirstLoad = false;
-                    createNewNote();
-                    return;
-                }
-
-                snapshot.docs.forEach(docSnap => {
-                    const data = docSnap.data();
-                    notesData[docSnap.id] = { id: docSnap.id, ...data };
-                    
-                    const div = document.createElement('div');
-                    div.className = `note-item p-4 rounded-xl cursor-pointer text-sm truncate ${currentNoteId === docSnap.id ? 'active' : 'text-white/40 hover:text-white/70 hover:bg-white/5'}`;
-                    div.innerText = data.title || 'Untitled Entry';
-                    div.onclick = () => switchNote(docSnap.id);
-                    noteList.appendChild(div);
-                });
-
-                if (isFirstLoad && snapshot.docs.length > 0) {
-                    isFirstLoad = false;
-                    switchNote(snapshot.docs[0].id);
-                }
-            }, (error) => {
-                console.error("Sync Error:", error);
-                loadingIndicator.innerText = "Connection error. Retrying...";
+        function renderNoteList() {
+            noteList.innerHTML = '';
+            notes.sort((a, b) => b.updatedAt - a.updatedAt).forEach(note => {
+                const div = document.createElement('div');
+                div.className = `note-item p-4 rounded-xl cursor-pointer text-sm truncate ${currentNoteId === note.id ? 'active' : 'text-white/40 hover:text-white/70 hover:bg-white/5'}`;
+                div.innerText = note.title || 'Untitled Entry';
+                div.onclick = () => switchNote(note.id);
+                noteList.appendChild(div);
             });
-        };
+        }
 
-        const switchNote = (id) => {
+        function switchNote(id) {
             currentNoteId = id;
-            const note = notesData[id];
+            const note = notes.find(n => n.id === id);
             if (note) {
-                noteTitle.value = note.title || '';
-                editor.value = note.content || '';
-            }
-            // Update active state in UI
-            Array.from(noteList.children).forEach(child => {
-                child.classList.remove('active', 'text-white');
-                child.classList.add('text-white/40');
-            });
-            const activeEl = Array.from(noteList.children).find(el => el.innerText === (note?.title || 'Untitled Entry'));
-            if (activeEl) {
-                activeEl.classList.add('active', 'text-white');
-                activeEl.classList.remove('text-white/40');
-            }
-        };
-
-        const createNewNote = async () => {
-            if (!user) return;
-            const id = 'note_' + Date.now();
-            currentNoteId = id;
-            const noteRef = doc(db, 'artifacts', appId, 'users', user.uid, 'notes', id);
-            await setDoc(noteRef, {
-                title: 'New Workspace',
-                content: '',
-                updatedAt: serverTimestamp()
-            });
-            switchNote(id);
-        };
-
-        const autoSave = async () => {
-            if (!user || !currentNoteId) return;
-            saveMsg.style.opacity = '1';
-            try {
-                await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'notes', currentNoteId), {
-                    title: noteTitle.value,
-                    content: editor.value,
-                    updatedAt: serverTimestamp()
-                }, { merge: true });
-                setTimeout(() => saveMsg.style.opacity = '0', 1000);
-            } catch (e) {
-                console.error("Save error:", e);
-            }
-        };
-
-        let saveTimeout;
-        const triggerAutoSave = () => {
-            clearTimeout(saveTimeout);
-            saveTimeout = setTimeout(autoSave, 800);
-        };
-
-        editor.addEventListener('input', triggerAutoSave);
-        noteTitle.addEventListener('input', triggerAutoSave);
-        newNoteBtn.addEventListener('click', createNewNote);
-        
-        deleteNoteBtn.addEventListener('click', async () => {
-            if (!currentNoteId) return;
-            const confirmDel = confirm('Delete this entry?');
-            if (confirmDel) {
-                await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'notes', currentNoteId));
-                currentNoteId = null;
-                editor.value = '';
+                noteTitle.value = note.title;
+                editor.value = note.content;
+            } else {
                 noteTitle.value = '';
+                editor.value = '';
             }
-        });
+            renderNoteList();
+            saveToDisk();
+        }
 
-        startAuth();
+        function createNote() {
+            const newNote = {
+                id: 'note_' + Date.now(),
+                title: 'New Entry',
+                content: '',
+                updatedAt: Date.now()
+            };
+            notes.push(newNote);
+            currentNoteId = newNote.id;
+            switchNote(newNote.id);
+        }
+
+        function deleteNote() {
+            if (!currentNoteId) return;
+            if (confirm('Delete this entry?')) {
+                notes = notes.filter(n => n.id !== currentNoteId);
+                currentNoteId = notes.length > 0 ? notes[0].id : null;
+                if (currentNoteId) {
+                    switchNote(currentNoteId);
+                } else {
+                    noteTitle.value = '';
+                    editor.value = '';
+                    renderNoteList();
+                    saveToDisk();
+                }
+            }
+        }
+
+        function handleInput() {
+            if (!currentNoteId) {
+                // If user starts typing but no note exists, create one
+                const id = 'note_' + Date.now();
+                notes.push({ id, title: 'New Entry', content: '', updatedAt: Date.now() });
+                currentNoteId = id;
+            }
+
+            const note = notes.find(n => n.id === currentNoteId);
+            if (note) {
+                note.title = noteTitle.value;
+                note.content = editor.value;
+                note.updatedAt = Date.now();
+                
+                // Visual save feedback
+                saveMsg.style.opacity = '1';
+                clearTimeout(window.saveMsgTimeout);
+                window.saveMsgTimeout = setTimeout(() => {
+                    saveMsg.style.opacity = '0';
+                }, 800);
+
+                saveToDisk();
+                // We don't re-render the whole list on every keystroke to keep it smooth, 
+                // just update the text of the active sidebar item
+                const activeItem = document.querySelector('.note-item.active');
+                if (activeItem) activeItem.innerText = note.title || 'Untitled Entry';
+            }
+        }
+
+        // Event Listeners
+        editor.addEventListener('input', handleInput);
+        noteTitle.addEventListener('input', handleInput);
+        newNoteBtn.addEventListener('click', createNote);
+        deleteNoteBtn.addEventListener('click', deleteNote);
+
+        // Initial Load
+        if (notes.length === 0) {
+            createNote();
+        } else {
+            if (!currentNoteId || !notes.find(n => n.id === currentNoteId)) {
+                currentNoteId = notes[0].id;
+            }
+            switchNote(currentNoteId);
+        }
     </script>
 </body>
 </html>
