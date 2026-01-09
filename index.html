@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Oria To Do | Pro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js" type="module"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js" type="module"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js" type="module"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap');
+
+        :root {
+            --bg-dark: #0a0a0a;
+            --glass-bg: rgba(22, 22, 22, 0.7);
+            --accent: #22c55e;
+            --border: rgba(255, 255, 255, 0.08);
+        }
+
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background-color: var(--bg-dark);
+            color: #e5e7eb;
+            overflow: hidden;
+        }
+
+        .glass-panel {
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-right: 1px solid var(--border);
+        }
+
+        .editor-container {
+            background: radial-gradient(circle at top left, #111, #0a0a0a);
+        }
+
+        #editor {
+            background: transparent;
+            border: none;
+            outline: none;
+            resize: none;
+            font-size: 1.1rem;
+            line-height: 1.8;
+            color: #d1d5db;
+            caret-color: var(--accent);
+        }
+
+        .note-item {
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .note-item.active {
+            background: rgba(34, 197, 94, 0.1);
+            border-left: 3px solid var(--accent);
+            color: white;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .status-online { background-color: var(--accent); box-shadow: 0 0 10px var(--accent); }
+
+        /* Hide scrollbars for a clean look */
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #333; border-radius: 10px; }
+    </style>
+</head>
+<body class="h-screen flex">
+
+    <!-- Sidebar -->
+    <aside class="w-72 glass-panel flex flex-col h-full z-10">
+        <div class="p-6 border-b border-white/5 flex items-center gap-3">
+            <img src="https://ik.imagekit.io/tycncf0zq0/Oria.png?updatedAt=1767746764146" alt="Oria" class="w-8 h-8 object-contain">
+            <h1 class="font-bold text-lg tracking-tight">Oria <span class="text-green-500">Pro</span></h1>
+        </div>
+
+        <div class="p-4">
+            <button id="newNote" class="w-full flex items-center justify-center gap-2 py-2.5 bg-white/5 hover:bg-white/10 rounded-xl transition-all border border-white/5 text-sm font-medium">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                </svg>
+                New Entry
+            </button>
+        </div>
+
+        <div id="noteList" class="flex-1 overflow-y-auto px-3 py-2 space-y-1">
+            <!-- Notes populate here -->
+            <div class="animate-pulse flex space-y-4 flex-col p-4">
+                <div class="h-4 bg-white/5 rounded w-3/4"></div>
+                <div class="h-4 bg-white/5 rounded w-1/2"></div>
+            </div>
+        </div>
+
+        <div class="p-6 border-t border-white/5 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+                <span class="status-dot status-online"></span>
+                <span class="text-[10px] uppercase tracking-widest opacity-50 font-bold">Cloud Synced</span>
+            </div>
+            <div id="saveMsg" class="text-[10px] text-green-500 opacity-0 transition-opacity">Saved</div>
+        </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="flex-1 flex flex-col editor-container relative">
+        <!-- Toolbar -->
+        <div class="h-16 flex items-center justify-between px-8 border-b border-white/5">
+            <input id="noteTitle" type="text" class="bg-transparent border-none outline-none text-lg font-semibold w-1/2" placeholder="Untitled Entry">
+            <div class="flex items-center gap-4">
+                <button id="deleteNote" class="p-2 text-white/30 hover:text-red-400 transition-colors">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- Single Editor (No Preview) -->
+        <div class="flex-1 flex justify-center p-8 lg:p-12 overflow-y-auto">
+            <textarea id="editor" class="w-full max-w-3xl h-full" placeholder="Start typing..."></textarea>
+        </div>
+    </main>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDocs, collection, query, onSnapshot, deleteDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        const firebaseConfig = JSON.parse(__firebase_config);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'oria-pro-v2';
+        
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        const editor = document.getElementById('editor');
+        const noteTitle = document.getElementById('noteTitle');
+        const noteList = document.getElementById('noteList');
+        const newNoteBtn = document.getElementById('newNote');
+        const deleteNoteBtn = document.getElementById('deleteNote');
+        const saveMsg = document.getElementById('saveMsg');
+
+        let user = null;
+        let currentNoteId = 'default';
+        let isSaving = false;
+        let notesData = {};
+
+        // Auth
+        const init = async () => {
+            const userCred = await signInAnonymously(auth);
+            user = userCred.user;
+            setupRealtimeSync();
+        };
+
+        const setupRealtimeSync = () => {
+            if (!user) return;
+            const q = collection(db, 'artifacts', appId, 'users', user.uid, 'notes');
+            
+            onSnapshot(q, (snapshot) => {
+                notesData = {};
+                noteList.innerHTML = '';
+                
+                if (snapshot.empty) {
+                    createNewNote();
+                    return;
+                }
+
+                snapshot.docs.forEach(doc => {
+                    const data = doc.data();
+                    notesData[doc.id] = { id: doc.id, ...data };
+                    
+                    const div = document.createElement('div');
+                    div.className = `note-item p-4 rounded-xl cursor-pointer text-sm truncate ${currentNoteId === doc.id ? 'active' : 'text-white/40 hover:text-white/70 hover:bg-white/5'}`;
+                    div.innerText = data.title || 'Untitled Entry';
+                    div.onclick = () => switchNote(doc.id);
+                    noteList.appendChild(div);
+                });
+
+                if (currentNoteId && notesData[currentNoteId]) {
+                    // Update current view if data changed remotely (rare but good practice)
+                    if (document.activeElement !== editor && document.activeElement !== noteTitle) {
+                        displayCurrentNote();
+                    }
+                }
+            }, (error) => console.error("Sync Error:", error));
+        };
+
+        const displayCurrentNote = () => {
+            const note = notesData[currentNoteId];
+            if (note) {
+                noteTitle.value = note.title || '';
+                editor.value = note.content || '';
+            }
+        };
+
+        const switchNote = (id) => {
+            currentNoteId = id;
+            displayCurrentNote();
+            setupRealtimeSync(); // Refresh list styles
+        };
+
+        const createNewNote = async () => {
+            const id = 'note_' + Date.now();
+            currentNoteId = id;
+            await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'notes', id), {
+                title: 'New Workspace',
+                content: '',
+                updatedAt: serverTimestamp()
+            });
+            switchNote(id);
+        };
+
+        const autoSave = async () => {
+            if (!user || !currentNoteId) return;
+            saveMsg.style.opacity = '1';
+            try {
+                await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'notes', currentNoteId), {
+                    title: noteTitle.value,
+                    content: editor.value,
+                    updatedAt: serverTimestamp()
+                }, { merge: true });
+                setTimeout(() => saveMsg.style.opacity = '0', 1000);
+            } catch (e) {
+                console.error(e);
+            }
+        };
+
+        let saveTimeout;
+        const triggerAutoSave = () => {
+            clearTimeout(saveTimeout);
+            saveTimeout = setTimeout(autoSave, 800);
+        };
+
+        // UI Listeners
+        editor.addEventListener('input', triggerAutoSave);
+        noteTitle.addEventListener('input', triggerAutoSave);
+        newNoteBtn.addEventListener('click', createNewNote);
+        
+        deleteNoteBtn.addEventListener('click', async () => {
+            if (confirm('Delete this entry forever?')) {
+                await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'notes', currentNoteId));
+                currentNoteId = Object.keys(notesData)[0] || 'default';
+            }
+        });
+
+        init();
+    </script>
+</body>
+</html>
